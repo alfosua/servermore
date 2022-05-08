@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -8,12 +9,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"syscall"
 
 	"servermore/host/guests"
 	"servermore/host/options"
-
-	"github.com/gin-gonic/gin"
 )
 
 type Application struct {
@@ -31,38 +31,28 @@ func run() int {
 
 	host := NewServermoreHost(options)
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	server := ServeConcurrent(host)
+	defer ShutdownServer(server)
+
+	cmd := setupWorkerProcess(options)
+	defer interruptProcess(cmd)
+
+	<-ctx.Done()
+	stop()
+
+	return 0
+}
+
+func setupWorkerProcess(options options.HostOptions) *exec.Cmd {
 	cmd, err := guests.StartWorker(options)
 
 	if err != nil {
 		panic(err)
 	}
-
-	defer interruptProcess(cmd)
-
-	go serve(host)
-
-	signalReceived := WaitSignals(syscall.SIGINT, syscall.SIGTERM)
-
-	switch signalReceived {
-	case syscall.SIGINT, syscall.SIGTERM:
-		log.Println("Received signal, shutting down...")
-	default:
-		log.Println("Received unknown signal.")
-		return 1
-	}
-
-	return 0
-}
-
-func serve(host *ServermoreHost) {
-	router := gin.Default()
-
-	router.GET("/:funcName", host.ServerlessFunctionGet)
-
-	router.GET("/internals/options", host.InternalOptionsGet)
-	router.POST("/internals/worker", host.WorkerPost)
-
-	router.Run(":8080")
+	return cmd
 }
 
 func ReverseProxyOf(endpoint string, writer http.ResponseWriter, req *http.Request) error {
@@ -91,7 +81,7 @@ func interruptProcess(cmd *exec.Cmd) {
 	err := cmd.Process.Signal(os.Interrupt)
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 }
