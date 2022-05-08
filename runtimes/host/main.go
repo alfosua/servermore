@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -30,14 +29,13 @@ func run() int {
 	options, err := options.ParseArgs()
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	cmd, err := guests.StartWorker(options)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
+		panic(err)
 	}
 
 	defer interruptProcess(cmd)
@@ -45,23 +43,20 @@ func run() int {
 	resp, err := http.Get("http://localhost:3000/internals")
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
+		panic(err)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
+		panic(err)
 	}
 
 	var appdef AppDef
 	err = json.Unmarshal(body, &appdef)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
+		panic(err)
 	}
 
 	go serve(appdef, options)
