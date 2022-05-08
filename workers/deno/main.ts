@@ -9,9 +9,26 @@ const workerApp = new Application();
 
 const userFunctions = await getUserFunctions(options.appDir);
 
+const resp = await fetch(new URL("internals/worker", options.hostUrl).href, {
+  method: "POST",
+  body: JSON.stringify({
+    guestEnv: "deno",
+    app: {
+      functions: Object.keys(userFunctions),
+    },
+  }),
+});
+
+if (!resp.ok) {
+  throw new Error(`Failed to post worker: ${resp.statusText}`);
+}
+
+const workerRecord = await resp.json();
+
 try {
   workerApp
-    .get("/internals", () => ({ functions: Object.keys(userFunctions) }))
+    .get("/internals", () => workerRecord)
+    .get("/internals/app", () => workerRecord.app)
     .get("/:funcName", handleFunctionCall)
     .start({ port: options.port });
 } catch (error) {

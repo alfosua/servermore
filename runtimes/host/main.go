@@ -17,10 +17,22 @@ import (
 	"servermore/host/options"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-type AppDef struct {
-	Functions []string
+type ServermoreHost struct {
+	Workers []*Worker
+	Options options.HostOptions
+}
+
+type Worker struct {
+	Id          string       `json:"guestId"`
+	GuestEnv    string       `json:"guestEnv"`
+	Application *Application `json:"app"`
+}
+
+type Application struct {
+	Functions []string `json:"functions"`
 }
 
 func main() { os.Exit(run()) }
@@ -32,6 +44,8 @@ func run() int {
 		panic(err)
 	}
 
+	host := NewServermoreHost(options)
+
 	cmd, err := guests.StartWorker(options)
 
 	if err != nil {
@@ -40,26 +54,7 @@ func run() int {
 
 	defer interruptProcess(cmd)
 
-	resp, err := http.Get("http://localhost:3000/internals")
-
-	if err != nil {
-		panic(err)
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		panic(err)
-	}
-
-	var appdef AppDef
-	err = json.Unmarshal(body, &appdef)
-
-	if err != nil {
-		panic(err)
-	}
-
-	go serve(appdef, options)
+	go serve(host)
 
 	signalChanel := make(chan os.Signal, 1)
 	signal.Notify(signalChanel,
@@ -81,30 +76,63 @@ func run() int {
 	return 0
 }
 
-func serve(appdef AppDef, options options.HostOptions) {
+func serve(host *ServermoreHost) {
 	router := gin.Default()
 
-	router.GET("/:funcName", func(c *gin.Context) {
-		funcName := c.Param("funcName")
+	router.GET("/:funcName", host.ServerlessFunctionGet)
 
-		for _, f := range appdef.Functions {
-			if f == funcName {
-				proxy(f, c.Writer, c.Request)
-				return
-			}
-		}
-
-		c.String(http.StatusNotFound, "Not found")
-	})
-
-	router.GET("/internals/options", func(c *gin.Context) {
-		c.IndentedJSON(http.StatusOK, options)
-	})
+	router.GET("/internals/options", host.InternalOptionsGet)
+	router.POST("/internals/worker", host.WorkerPost)
 
 	router.Run(":8080")
 }
 
-func proxy(endpoint string, writer http.ResponseWriter, req *http.Request) error {
+func NewServermoreHost(options options.HostOptions) *ServermoreHost {
+	return &ServermoreHost{
+		Options: options,
+	}
+}
+
+func (host *ServermoreHost) ServerlessFunctionGet(c *gin.Context) {
+	funcName := c.Param("funcName")
+
+	for _, w := range host.Workers {
+		for _, f := range w.Application.Functions {
+			if f == funcName {
+				ReverseProxyOf(f, c.Writer, c.Request)
+				return
+			}
+		}
+	}
+
+	c.String(http.StatusNotFound, "Not found")
+}
+
+func (host *ServermoreHost) InternalOptionsGet(c *gin.Context) {
+	options := host.Options
+	c.JSON(http.StatusOK, options)
+}
+
+func (host *ServermoreHost) WorkerPost(c *gin.Context) {
+	body, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	workerId := uuid.New().String()
+	worker := &Worker{Id: workerId}
+	err = json.Unmarshal(body, &worker)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	host.Workers = append(host.Workers, worker)
+	log.Printf("Worker logged in: Id = %s, GuestEnv = %s\n", worker.Id, worker.GuestEnv)
+
+	c.JSON(http.StatusCreated, *worker)
+}
+
+func ReverseProxyOf(endpoint string, writer http.ResponseWriter, req *http.Request) error {
 	remote, err := url.Parse("http://localhost:3000")
 	if err != nil {
 		return errors.New("invalid url")
