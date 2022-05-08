@@ -2,19 +2,18 @@ package guests
 
 import (
 	"fmt"
-	"log"
+	"os/exec"
 	"servermore/host/options"
 )
 
-func StartWorker(ops options.HostOptions) (err error) {
+func StartWorker(ops options.HostOptions) (cmd *exec.Cmd, err error) {
 
-	if ops.GuestEnv == "deno" {
-		err = StartDenoWorker(ops.WorkerDir, ops.AppDir)
-	} else {
-		log.Fatal(
-			fmt.Errorf("unknown guest environment: \"%s\"", ops.GuestEnv),
-		)
+	switch ops.GuestEnv {
+	case "deno":
+		cmd, err = StartDenoWorker(ops.WorkerDir, ops.AppDir)
+	default:
+		err = fmt.Errorf("unknown guest environment: %s", ops.GuestEnv)
 	}
 
-	return err
+	return cmd, err
 }

@@ -3,11 +3,16 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"syscall"
 
 	"servermore/host/guests"
 	"servermore/host/options"
@@ -19,38 +24,69 @@ type AppDef struct {
 	Functions []string
 }
 
-func main() {
+func main() { os.Exit(run()) }
+
+func run() int {
 	options, err := options.ParseArgs()
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = guests.StartWorker(options)
+	cmd, err := guests.StartWorker(options)
 
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
 	}
+
+	defer interruptProcess(cmd)
 
 	resp, err := http.Get("http://localhost:3000/internals")
 
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
 	}
 
 	var appdef AppDef
 	err = json.Unmarshal(body, &appdef)
 
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
 	}
 
+	go serve(appdef, options)
+
+	signalChanel := make(chan os.Signal, 1)
+	signal.Notify(signalChanel,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	signalReceived := <-signalChanel
+
+	switch signalReceived {
+	case syscall.SIGINT, syscall.SIGTERM:
+		log.Println("Received signal, shutting down...")
+	default:
+		log.Println("Received signal.")
+		return 1
+	}
+
+	return 0
+}
+
+func serve(appdef AppDef, options options.HostOptions) {
 	router := gin.Default()
 
 	router.GET("/:funcName", func(c *gin.Context) {
@@ -91,4 +127,15 @@ func proxy(endpoint string, writer http.ResponseWriter, req *http.Request) error
 	proxy.ServeHTTP(writer, req)
 
 	return nil
+}
+
+func interruptProcess(cmd *exec.Cmd) {
+	log.Println("Interrupting worker")
+
+	err := cmd.Process.Signal(os.Interrupt)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }
