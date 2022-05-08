@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"servermore/host/options"
@@ -23,9 +23,12 @@ type ServermoreWorker struct {
 }
 
 func NewServermoreHost(options options.HostOptions) *ServermoreHost {
-	return &ServermoreHost{
-		Options: options,
-	}
+	return &ServermoreHost{Options: options}
+}
+
+func NewServermoreWorker() *ServermoreWorker {
+	id := uuid.New().String()
+	return &ServermoreWorker{Id: id}
 }
 
 func (host *ServermoreHost) InternalOptionsGet(c *gin.Context) {
@@ -34,16 +37,18 @@ func (host *ServermoreHost) InternalOptionsGet(c *gin.Context) {
 }
 
 func (host *ServermoreHost) WorkerPost(c *gin.Context) {
-	body, err := ioutil.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
+
 	if err != nil {
-		log.Fatal(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
-	workerId := uuid.New().String()
-	worker := &ServermoreWorker{Id: workerId}
+	worker := NewServermoreWorker()
 	err = json.Unmarshal(body, &worker)
 	if err != nil {
-		log.Fatal(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	host.Workers = append(host.Workers, worker)
