@@ -1,6 +1,7 @@
-import * as path from 'https://deno.land/std@0.138.0/path/mod.ts';
+import * as path from "https://deno.land/std@0.138.0/path/mod.ts";
 import { Application, Context } from "https://deno.land/x/abc@v1.3.3/mod.ts";
 import { loadOptions } from "./args.ts";
+import { bold, red } from "https://deno.land/std@0.138.0/fmt/colors.ts";
 
 const options = loadOptions();
 
@@ -8,10 +9,24 @@ const workerApp = new Application();
 
 const userFunctions = await getUserFunctions(options.appDir);
 
-workerApp
-  .get("/internals", () => ({ functions: Object.keys(userFunctions) }))
-  .get("/:funcName", handleFunctionCall)
-  .start({ port: options.port });
+try {
+  workerApp
+    .get("/internals", () => ({ functions: Object.keys(userFunctions) }))
+    .get("/:funcName", handleFunctionCall)
+    .start({ port: options.port });
+} catch (error) {
+  if (error instanceof Error && error.name === "AddrInUse") {
+    console.error(
+      red(
+        `Port ${
+          bold(`${options.port}`)
+        } is already in use. Please choose another port.`,
+      ),
+    );
+    Deno.exit(1);
+  }
+  throw error;
+}
 
 type FunctionsMap = Record<string, (...args: unknown[]) => unknown>;
 
